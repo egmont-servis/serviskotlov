@@ -288,6 +288,23 @@ select option{background:#132233;}
   @page{size:A4;margin:0;}
 }
 
+/* ── PREHLIADAČ FOTIEK ── */
+.pv{position:fixed;inset:0;z-index:1000;background:#000;display:none;flex-direction:column;}
+.pv.open{display:flex;}
+.pv-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;background:rgba(0,0,0,.65);color:#fff;flex-shrink:0;}
+.pv-cnt{font-family:var(--mono);font-size:12px;opacity:.8;}
+.pv-acts{display:flex;gap:8px;}
+.pv-btn{background:rgba(255,255,255,.14);border:none;color:#fff;border-radius:9px;padding:9px 14px;font-size:14px;cursor:pointer;font-family:var(--sans);}
+.pv-btn.close{background:var(--danger);}
+.pv-wrap{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;-webkit-overflow-scrolling:touch;}
+.pv-wrap img{max-width:100%;max-height:100%;object-fit:contain;display:block;}
+.pv-wrap.zoom{align-items:flex-start;justify-content:flex-start;}
+.pv-wrap.zoom img{max-width:none;max-height:none;width:250%;}
+.pv-nav{display:flex;gap:8px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:rgba(0,0,0,.65);flex-shrink:0;}
+.pv-nav button{flex:1;background:rgba(255,255,255,.14);border:none;color:#fff;border-radius:10px;padding:13px;font-size:15px;cursor:pointer;}
+.pv-nav button:disabled{opacity:.3;}
+.pv-hint{text-align:center;color:rgba(255,255,255,.55);font-family:var(--mono);font-size:10px;padding:0 16px 8px;background:rgba(0,0,0,.65);}
+
 /* ── TOAST ── */
 .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--accent3);color:var(--bg);padding:10px 24px;border-radius:20px;font-family:var(--mono);font-size:13px;font-weight:600;z-index:999;opacity:0;transition:all .3s;pointer-events:none;white-space:nowrap;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -772,6 +789,24 @@ input[type="file"]{display:none;}
 
 <!-- PRINT AREA (hidden, shown on print) -->
 <div id="printArea" style="display:none"></div>
+
+<!-- PREHLIADAČ FOTIEK -->
+<div class="pv" id="photoViewer">
+  <div class="pv-top">
+    <div class="pv-cnt" id="pvCount">1 / 1</div>
+    <div class="pv-acts">
+      <button class="pv-btn" onclick="pvToggleZoom()" id="pvZoomBtn">🔍 Priblížiť</button>
+      <button class="pv-btn" onclick="pvSave()">⬇️ Uložiť</button>
+      <button class="pv-btn close" onclick="closePhotoViewer()">✕</button>
+    </div>
+  </div>
+  <div class="pv-wrap" id="pvWrap"><img id="pvImg" alt=""></div>
+  <div class="pv-hint">Fotku uložíš do Fotiek aj podržaním prsta na obrázku</div>
+  <div class="pv-nav" id="pvNav">
+    <button onclick="pvPrev()" id="pvPrevBtn">‹ Predchádzajúca</button>
+    <button onclick="pvNext()" id="pvNextBtn">Nasledujúca ›</button>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 <script>
@@ -1302,8 +1337,8 @@ function renderPhotoGrid(){
   const g=document.getElementById('photoGrid');
   g.innerHTML=currentEditPhotos.map((src,i)=>`
     <div class="photo-thumb">
-      <img src="${src}" alt="foto ${i+1}">
-      <button class="photo-del" onclick="removePhoto(${i})">✕</button>
+      <img src="${src}" alt="foto ${i+1}" onclick="viewEditPhoto(${i})">
+      <button class="photo-del" onclick="event.stopPropagation();removePhoto(${i})">✕</button>
     </div>`).join('')+`<div class="photo-add" onclick="document.getElementById('photoInput').click()">📷</div>`;
 }
 function removePhoto(i){currentEditPhotos.splice(i,1);renderPhotoGrid();}
@@ -1364,9 +1399,63 @@ function renderDetailPhotos(){
   const ph=(c&&c.photos)||[];
   const g=document.getElementById('detailPhotoGrid');
   if(!ph.length){g.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-ic">📸</div>Žiadne fotky</div>';return;}
-  g.innerHTML=ph.map((src,i)=>`<div class="photo-thumb" onclick="viewPhoto('${src}')"><img src="${src}" alt="foto ${i+1}"></div>`).join('');
+  g.innerHTML=ph.map((src,i)=>`<div class="photo-thumb" onclick="viewPhoto(${i})"><img src="${src}" alt="foto ${i+1}"></div>`).join('');
 }
-function viewPhoto(src){window.open(src,'_blank');}
+
+// ═══════════════════════════════════════════════
+// PREHLIADAČ FOTIEK
+// (dátové URL sa nedajú otvoriť v novej karte — prehliadače
+//  to blokujú, preto sa fotka zobrazuje priamo v aplikácii)
+// ═══════════════════════════════════════════════
+let pvList=[], pvIdx=0;
+
+function viewPhoto(i){
+  const c=custs.find(x=>x.id===detailId);
+  openPhotoViewer((c&&c.photos)||[], i);
+}
+function viewEditPhoto(i){ openPhotoViewer(currentEditPhotos||[], i); }
+
+function openPhotoViewer(list, i){
+  if(!list || !list.length) return;
+  pvList=list; pvIdx=Math.max(0, Math.min(i|0, list.length-1));
+  document.getElementById('photoViewer').classList.add('open');
+  pvShow();
+}
+function closePhotoViewer(){
+  document.getElementById('photoViewer').classList.remove('open');
+  document.getElementById('pvWrap').classList.remove('zoom');
+  document.getElementById('pvImg').src='';
+}
+function pvShow(){
+  const img=document.getElementById('pvImg');
+  img.src=pvList[pvIdx]||'';
+  document.getElementById('pvCount').textContent=(pvIdx+1)+' / '+pvList.length;
+  document.getElementById('pvWrap').classList.remove('zoom');
+  document.getElementById('pvZoomBtn').textContent='🔍 Priblížiť';
+  document.getElementById('pvPrevBtn').disabled = pvIdx<=0;
+  document.getElementById('pvNextBtn').disabled = pvIdx>=pvList.length-1;
+  document.getElementById('pvNav').style.display = pvList.length>1 ? 'flex' : 'none';
+}
+function pvNext(){ if(pvIdx<pvList.length-1){pvIdx++;pvShow();} }
+function pvPrev(){ if(pvIdx>0){pvIdx--;pvShow();} }
+function pvToggleZoom(){
+  const w=document.getElementById('pvWrap');
+  const on=w.classList.toggle('zoom');
+  document.getElementById('pvZoomBtn').textContent = on ? '🔍 Oddialiť' : '🔍 Priblížiť';
+  if(!on){ w.scrollTop=0; w.scrollLeft=0; }
+}
+function pvSave(){
+  const src=pvList[pvIdx]; if(!src)return;
+  try{
+    const a=document.createElement('a');
+    a.href=src;
+    a.download='fotka-'+(pvIdx+1)+'.jpg';
+    document.body.appendChild(a); a.click(); a.remove();
+    showToast('⬇️ Fotka uložená');
+  }catch(e){
+    showToast('Podrž prst na fotke a zvoľ Uložiť','var(--warn)');
+  }
+}
 
 // ═══════════════════════════════════════════════
 // HISTORY
@@ -2684,6 +2773,13 @@ document.addEventListener('visibilitychange', ()=>{
 // ═══════════════════════════════════════════════
 // CLOSE ON BG CLICK
 // ═══════════════════════════════════════════════
+document.addEventListener('keydown', e=>{
+  if(!document.getElementById('photoViewer').classList.contains('open')) return;
+  if(e.key==='Escape') closePhotoViewer();
+  if(e.key==='ArrowRight') pvNext();
+  if(e.key==='ArrowLeft') pvPrev();
+});
+
 ['custModal','detailModal','histModal','driveHelpModal'].forEach(id=>{
   document.getElementById(id).addEventListener('click',function(e){if(e.target===this)this.classList.remove('open');});
 });
